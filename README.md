@@ -70,24 +70,24 @@ PC에서 명령어를 칠 필요 없이, GitHub가 자동으로 exe를 만들어
 잠시 후 `https://kwaho-stack.github.io/mess/` 주소로 페이지가 열립니다.
 (현재 상태 + 변경 로그가 표시되고 20초마다 자동 새로고침)
 
-### (2) 프로그램이 자동 업로드하도록 설정
-`config.json` 의 `github` 부분을 채웁니다 (이 파일은 토큰이 들어있어 git에 올라가지 않습니다):
+### (2) 프로그램이 자동 업로드하도록 설정 — `setup.bat` 더블클릭
+JSON 을 손으로 고칠 필요 없이 **`setup.bat` 을 더블클릭**하면 됩니다.
+물어보는 대로 입력(그냥 Enter면 기본값):
 
-```json
-"github": {
-  "enabled": true,
-  "repo": "kwaho-stack/mess",
-  "branch": "claude/messenger-status-detection-n0evlx",
-  "token": "github_pat_..."
-}
+```
+repo  [kwaho-stack/mess] :        ← 그냥 Enter
+branch[claude/...]       :        ← 그냥 Enter
+token (github_pat_...)   :        ← 토큰 붙여넣고 Enter
 ```
 
-- 토큰: GitHub → Settings → Developer settings → **Personal access tokens**
-  → 이 저장소에 **Contents: Read and write** 권한
-- ⚠ **Pages 의 Branch 와 `config.json` 의 `github.branch` 가 반드시 같아야** 합니다.
-- `enabled: true` 면 상태가 바뀔 때마다(그리고 시작 시 1회) `docs/data.json` 과
-  그날 txt 로그를 GitHub에 자동 업로드 → 웹 페이지가 갱신됩니다.
-- `enabled: false`(기본)면 로컬 파일(`logs/`, `docs/data.json`)만 만듭니다.
+입력하면 바로 업로드 테스트까지 해서 `성공!` / `실패` 를 알려줍니다.
+
+- 토큰: GitHub → Settings → Developer settings → **Personal access tokens (Fine-grained)**
+  → Repository access: 이 저장소 → **Permissions → Contents: Read and write**
+- ⚠ **Pages 의 Branch 와 설정의 branch 가 반드시 같아야** 합니다.
+- 설정 후엔 `run.bat`(또는 exe 더블클릭)으로 평소처럼 실행하면 됩니다.
+- 상태가 바뀔 때마다(그리고 시작 시 1회) `docs/data.json` 과 그날 txt 로그를
+  GitHub에 자동 업로드 → 웹 페이지가 갱신됩니다.
 
 ---
 

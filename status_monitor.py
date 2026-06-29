@@ -243,6 +243,44 @@ def publish(cfg, data, day):
 
 
 # ---------------------------------------------------------------------------
+# setup : GitHub 연동 설정(JSON 직접 수정 없이)
+# ---------------------------------------------------------------------------
+def cmd_setup():
+    cfg = load_config()
+    gh = cfg.setdefault("github", dict(DEFAULT_CONFIG["github"]))
+
+    print("GitHub 연동 설정 (그냥 Enter 치면 [ ] 안 기본값 사용)")
+    repo = input(f"  repo  [{gh.get('repo') or 'kwaho-stack/mess'}] : ").strip() \
+        or gh.get("repo") or "kwaho-stack/mess"
+    branch = input(f"  branch[{gh.get('branch')}] : ").strip() or gh.get("branch")
+    token = input("  token (github_pat_... 붙여넣기) : ").strip() or gh.get("token", "")
+
+    gh.update(enabled=True, repo=repo, branch=branch, token=token)
+    save_config(cfg)
+    print("저장됨:", CONFIG_PATH)
+
+    # 즉시 테스트 업로드
+    print("업로드 테스트 중...")
+    now = datetime.now()
+    last_state, since, events = read_today_state(cfg, now)
+    _, data = write_web_data(cfg, last_state or "OFF", since, events)
+    publish(cfg, data, logical_date(now, cfg["rollover_hour"]))
+
+    # 방금 결과 확인
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            last = f.read().strip().splitlines()[-1]
+        print("결과:", last)
+        if "업로드 OK" in last:
+            print(f"성공! https://{repo.split('/')[0]}.github.io/{repo.split('/')[-1]}/ 에서 확인하세요.")
+        else:
+            print("실패했습니다. 위 결과 메시지를 확인하세요.")
+    except Exception:
+        pass
+    input("Enter 를 누르면 닫힙니다 > ")
+
+
+# ---------------------------------------------------------------------------
 # calibrate
 # ---------------------------------------------------------------------------
 def cmd_calibrate():
@@ -332,6 +370,8 @@ def main():
     cmd = sys.argv[1].lower() if len(sys.argv) > 1 else ""
     if cmd == "calibrate":
         cmd_calibrate()
+    elif cmd == "setup":
+        cmd_setup()
     elif cmd == "run":
         cmd_run()
     elif cmd in ("", "auto"):
