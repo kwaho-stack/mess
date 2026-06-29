@@ -73,6 +73,19 @@ def save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
+# 진단용: 터미널 대신 monitor.log 파일에 기록
+LOG_FILE = os.path.join(BASE_DIR, "monitor.log")
+
+
+def log(msg):
+    line = f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}"
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # 색 -> 상태 판별
 # ---------------------------------------------------------------------------
@@ -168,13 +181,17 @@ def write_web_data(cfg, current_code, since, events):
 # ---------------------------------------------------------------------------
 def github_put(cfg, repo_path, content_bytes, message):
     gh = cfg.get("github", {})
-    if not gh.get("enabled") or not gh.get("token") or not gh.get("repo"):
+    if not gh.get("enabled"):
+        return
+    if not gh.get("token") or not gh.get("repo"):
+        log("업로드 안함: config.json 의 github token/repo 가 비어 있음")
         return
     api = f"https://api.github.com/repos/{gh['repo']}/contents/{repo_path}"
     headers = {
-        "Authorization": f"token {gh['token']}",
+        "Authorization": f"Bearer {gh['token'].strip()}",
         "Accept": "application/vnd.github+json",
         "User-Agent": "messenger-status-monitor",
+        "X-GitHub-Api-Version": "2022-11-28",
     }
     # 기존 파일 sha 조회
     sha = None
@@ -183,10 +200,12 @@ def github_put(cfg, repo_path, content_bytes, message):
         with urllib.request.urlopen(req, timeout=15) as r:
             sha = json.loads(r.read()).get("sha")
     except urllib.error.HTTPError as e:
-        if e.code != 404:
-            print(f"  ⚠ GitHub 조회 실패({e.code})")
+        if e.code == 404:
+            pass  # 파일이 아직 없음 → 새로 생성
+        else:
+            log(f"조회 실패 {e.code} {repo_path}: {e.read().decode(errors='ignore')[:200]}")
     except Exception as e:
-        print(f"  ⚠ GitHub 연결 실패: {e}")
+        log(f"연결 실패 {repo_path}: {e}")
         return
     body = {
         "message": message,
@@ -199,9 +218,12 @@ def github_put(cfg, repo_path, content_bytes, message):
         req = urllib.request.Request(
             api, data=json.dumps(body).encode(), headers=headers, method="PUT")
         urllib.request.urlopen(req, timeout=15).read()
-        print("  ☁ GitHub 업로드 완료:", repo_path)
+        log(f"업로드 OK -> {gh['repo']}@{gh['branch']}:{repo_path}")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="ignore")[:300]
+        log(f"업로드 실패 {e.code} {repo_path}: {detail}")
     except Exception as e:
-        print(f"  ⚠ GitHub 업로드 실패: {e}")
+        log(f"업로드 실패 {repo_path}: {e}")
 
 
 def publish(cfg, data, day):
@@ -259,12 +281,14 @@ def cmd_run():
     last_state, since, events = read_today_state(cfg, now)
     _, cur_day = day_log_path(cfg, now)
 
-    print("종료하려면 Ctrl+C")
-    if last_state:
-        print(f"현재 {KOR[last_state]} ({since})")
+    print("실행 중입니다. 이 창은 그대로 두세요. (종료: 이 창 닫기)")
 
-    # 시작 시 한 번 웹데이터 갱신
+    gh = cfg.get("github", {})
+    log(f"시작: github_enabled={gh.get('enabled')} repo={gh.get('repo')} branch={gh.get('branch')}")
+
+    # 시작 시 한 번 웹데이터 만들고 즉시 업로드 → 바로 확인 가능
     _, data = write_web_data(cfg, last_state or "OFF", since, events)
+    publish(cfg, data, cur_day)
 
     try:
         with mss.MSS() as sct:
@@ -290,7 +314,7 @@ def cmd_run():
                     append_txt(path, now, state)
                     events.append({"time": ts, "state": KOR[state]})
                     since = ts
-                    print(f"[{now:%H:%M:%S}] {KOR[state]}")
+                    log(f"상태변경 {KOR[state]}")
                     last_state = state
                     _, data = write_web_data(cfg, state, since, events)
                     publish(cfg, data, day)

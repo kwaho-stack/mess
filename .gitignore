@@ -11,3 +11,4 @@ __pycache__/
 # 로컬에서 생성되는 일별 로그(프로그램이 GitHub API 로 따로 업로드함)
 logs/
 status_log.csv
+monitor.log
