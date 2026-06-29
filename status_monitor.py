@@ -8,10 +8,10 @@
   - 현재 상태와 변경 로그를 docs/data.json 으로 만들어 HTML 에서 볼 수 있게 함
   - (선택) GitHub 에 자동 업로드하여 웹에서 확인 가능
 
-사용법
-  처음(좌표 등록):   messenger_status.exe calibrate
-  감시 시작:         messenger_status.exe run
-  그냥 더블클릭 시 : 등록된 사람이 없으면 자동으로 좌표 등록, 있으면 감시 시작
+실행
+  messenger_status.exe            더블클릭 (좌표 없으면 등록, 있으면 실행)
+  messenger_status.exe calibrate  좌표 등록
+  messenger_status.exe run        실행
 """
 
 import base64
@@ -81,11 +81,8 @@ def avg_color(sct, x, y, radius):
     region = {"left": x - radius, "top": y - radius, "width": size, "height": size}
     shot = sct.grab(region)
     img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-    px = list(img.getdata())
-    n = len(px)
-    return (sum(p[0] for p in px) / n,
-            sum(p[1] for p in px) / n,
-            sum(p[2] for p in px) / n)
+    # 1x1 로 줄이면 영역 평균색이 된다 (deprecated getdata 회피)
+    return img.resize((1, 1), Image.BOX).getpixel((0, 0))
 
 
 def classify(rgb):
@@ -230,27 +227,17 @@ def cmd_calibrate():
     import pyautogui
 
     cfg = load_config()
-    print("=" * 60)
-    print(" 좌표 등록")
-    print("=" * 60)
-    print("메신저 목록에서 감시할 사람의 '상태 아이콘(동그라미)' 위에")
-    print("마우스를 올린 뒤, 이 창에서 Enter 를 누르세요.")
-    print("-" * 60)
-
-    name = input("감시할 사람 이름(메모용): ").strip() or "대상"
-    input(f"'{name}' 의 상태 아이콘 위에 마우스를 올리고 Enter...")
+    input("아이콘 위에 마우스를 올리고 Enter > ")
     x, y = pyautogui.position()
-    with mss.mss() as sct:
+    with mss.MSS() as sct:
         rgb = avg_color(sct, x, y, cfg["sample_radius"])
     state = classify(rgb)
-    print(f"  좌표=({x}, {y})  색={tuple(int(v) for v in rgb)}  판별={KOR.get(state, state)}")
-    if state == "UNKNOWN":
-        print("  ⚠ 색 판별이 애매합니다. 아이콘 정중앙을 다시 가리켜 보세요.")
 
-    cfg["target"] = {"name": name, "x": x, "y": y}
+    cfg["target"] = {"name": "", "x": x, "y": y}
     save_config(cfg)
-    print("\n저장됨:", CONFIG_PATH)
-    print("이제 'messenger_status.exe run' 으로 감시를 시작하세요.")
+    print(f"등록됨 ({x}, {y}) · 현재 {KOR.get(state, '?')}")
+    if state == "UNKNOWN":
+        print("색이 애매합니다. 아이콘 정중앙으로 다시 등록하세요.")
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +247,6 @@ def cmd_run():
     cfg = load_config()
     tgt = cfg.get("target", {})
     if not tgt.get("x"):
-        print("등록된 좌표가 없습니다. 먼저 'calibrate' 를 실행하세요.")
         cmd_calibrate()
         cfg = load_config()
         tgt = cfg.get("target", {})
@@ -273,27 +259,21 @@ def cmd_run():
     last_state, since, events = read_today_state(cfg, now)
     _, cur_day = day_log_path(cfg, now)
 
-    print("=" * 60)
-    print(" 감시 시작 (Ctrl+C 종료)")
-    print("=" * 60)
-    print(f"확인 주기 {interval}초 | 마감 {cfg['rollover_hour']}시 | 로그 폴더 {cfg['log_dir']}/")
-    print(f"GitHub 업로드: {'켜짐' if cfg.get('github', {}).get('enabled') else '꺼짐'}")
+    print("종료하려면 Ctrl+C")
     if last_state:
-        print(f"이어서 시작 - 현재 상태: {KOR[last_state]} (since {since})")
-    print("-" * 60)
+        print(f"현재 {KOR[last_state]} ({since})")
 
     # 시작 시 한 번 웹데이터 갱신
     _, data = write_web_data(cfg, last_state or "OFF", since, events)
 
     try:
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             while True:
                 now = datetime.now()
                 _, day = day_log_path(cfg, now)
 
                 # 날짜(3시) 넘어가면 새 파일로 전환 + 이전 날 마무리 업로드
                 if day != cur_day:
-                    print(f"[{now:%H:%M:%S}] 날짜 전환: {cur_day} 마감 -> {day}")
                     publish(cfg, data, cur_day)
                     last_state, since, events = None, None, []
                     cur_day = day
@@ -310,8 +290,7 @@ def cmd_run():
                     append_txt(path, now, state)
                     events.append({"time": ts, "state": KOR[state]})
                     since = ts
-                    prev = KOR.get(last_state, "시작")
-                    print(f"[{now:%H:%M:%S}] {prev} -> {KOR[state]}  (기록됨)")
+                    print(f"[{now:%H:%M:%S}] {KOR[state]}")
                     last_state = state
                     _, data = write_web_data(cfg, state, since, events)
                     publish(cfg, data, day)
@@ -321,7 +300,7 @@ def cmd_run():
 
                 time.sleep(interval)
     except KeyboardInterrupt:
-        print("\n종료했습니다.")
+        print("\n종료")
 
 
 # ---------------------------------------------------------------------------
