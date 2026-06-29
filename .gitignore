@@ -1,0 +1,4 @@
+config.json
+status_log.csv
+__pycache__/
+*.pyc
