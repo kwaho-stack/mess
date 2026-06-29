@@ -36,6 +36,10 @@
   .pill.away { background: #e8f1fb; color: #1f6fc0; }
   .pill.off  { background: #eef0f2; color: #5a6470; }
   .pill .dot { width: 8px; height: 8px; }
+  tr.dayhead td {
+    background: #f7f9fb; color: #5a6470; font-weight: 700;
+    font-size: 13px; padding: 8px;
+  }
   .meta { color: #97a0a8; font-size: 12px; margin-top: 12px; }
 </style>
 </head>
@@ -83,10 +87,22 @@ async function load() {
     document.getElementById("since").textContent =
       d.since ? `${d.since} 부터 · ${fmtDuration(d.since)}` : "";
 
-    const rows = (d.events || []).map(e => {
+    const events = d.events || [];
+    let rows = "";
+    let curDay = null;
+    for (const e of events) {
+      const day = e.day || (e.time || "").slice(0, 10);
+      if (day !== curDay) {
+        curDay = day;
+        let label = day;
+        if (day === d.today) label = "오늘 (" + day + ")";
+        else if (day === d.yesterday) label = "어제 (" + day + ")";
+        rows += `<tr class="dayhead"><td colspan="2">${label}</td></tr>`;
+      }
       const c = CLS[e.state] || "off";
-      return `<tr><td>${e.time}</td><td><span class="pill ${c}"><span class="dot ${c}"></span>${e.state}</span></td></tr>`;
-    }).join("");
+      const time = (e.time || "").slice(11) || e.time;
+      rows += `<tr><td>${time}</td><td><span class="pill ${c}"><span class="dot ${c}"></span>${e.state}</span></td></tr>`;
+    }
     document.getElementById("log").innerHTML =
       rows || `<tr><td colspan="2" style="color:#97a0a8">기록 없음</td></tr>`;
 

@@ -138,11 +138,10 @@ def append_txt(path, dt, state_code):
         f.write(line)
 
 
-def read_today_state(cfg, now):
-    """오늘(논리적 날짜) txt 가 있으면 마지막 상태/시각/이벤트들을 복원."""
-    path, _ = day_log_path(cfg, now)
-    events = []
-    last_state, since = None, None
+def read_day_events(cfg, d):
+    """특정 날짜(d) txt 파일을 읽어 이벤트 목록으로 반환."""
+    path = os.path.join(BASE_DIR, cfg["log_dir"], f"{d.isoformat()}.txt")
+    out = []
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             for raw in f:
@@ -150,24 +149,35 @@ def read_today_state(cfg, now):
                 if not raw:
                     continue
                 ts, _, kor = raw.partition("  ")
-                events.append({"time": ts, "state": kor})
-        if events:
-            last = events[-1]
-            since = last["time"]
-            # 한글 -> 코드 역변환
-            for code, name in KOR.items():
-                if name == last["state"]:
-                    last_state = code
-    return last_state, since, events
+                out.append({"time": ts, "state": kor, "day": d.isoformat()})
+    return out
 
 
-def write_web_data(cfg, current_code, since, events):
+def read_today_state(cfg, now):
+    """오늘(논리적 날짜) txt 가 있으면 마지막 상태/시각을 복원."""
+    today = logical_date(now, cfg["rollover_hour"])
+    events = read_day_events(cfg, today)
+    if events:
+        last = events[-1]
+        for code, name in KOR.items():
+            if name == last["state"]:
+                return code, last["time"]
+    return None, None
+
+
+def write_web_data(cfg, current_code, since, now):
+    """오늘 + 어제 이벤트를 합쳐 data.json 생성."""
     docs = os.path.join(BASE_DIR, cfg["docs_dir"])
     os.makedirs(docs, exist_ok=True)
+    today = logical_date(now, cfg["rollover_hour"])
+    yest = today - timedelta(days=1)
+    events = read_day_events(cfg, yest) + read_day_events(cfg, today)
     data = {
-        "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
         "current": KOR.get(current_code, "알수없음"),
         "since": since or "",
+        "today": today.isoformat(),
+        "yesterday": yest.isoformat(),
         "events": events[-cfg["max_web_events"]:][::-1],  # 최신순
     }
     path = os.path.join(docs, "data.json")
@@ -262,8 +272,8 @@ def cmd_setup():
     # 즉시 테스트 업로드
     print("업로드 테스트 중...")
     now = datetime.now()
-    last_state, since, events = read_today_state(cfg, now)
-    _, data = write_web_data(cfg, last_state or "OFF", since, events)
+    last_state, since = read_today_state(cfg, now)
+    _, data = write_web_data(cfg, last_state or "OFF", since, now)
     publish(cfg, data, logical_date(now, cfg["rollover_hour"]))
 
     # 방금 결과 확인
@@ -316,7 +326,7 @@ def cmd_run():
     radius = cfg["sample_radius"]
 
     now = datetime.now()
-    last_state, since, events = read_today_state(cfg, now)
+    last_state, since = read_today_state(cfg, now)
     _, cur_day = day_log_path(cfg, now)
 
     print("실행 중입니다. 이 창은 그대로 두세요. (종료: 이 창 닫기)")
@@ -325,7 +335,7 @@ def cmd_run():
     log(f"시작: github_enabled={gh.get('enabled')} repo={gh.get('repo')} branch={gh.get('branch')}")
 
     # 시작 시 한 번 웹데이터 만들고 즉시 업로드 → 바로 확인 가능
-    _, data = write_web_data(cfg, last_state or "OFF", since, events)
+    _, data = write_web_data(cfg, last_state or "OFF", since, now)
     publish(cfg, data, cur_day)
 
     try:
@@ -334,10 +344,9 @@ def cmd_run():
                 now = datetime.now()
                 _, day = day_log_path(cfg, now)
 
-                # 날짜(3시) 넘어가면 새 파일로 전환 + 이전 날 마무리 업로드
+                # 날짜(3시) 넘어가면 새 파일로 전환 (현재 상태를 새 날 첫 기록으로 남김)
                 if day != cur_day:
-                    publish(cfg, data, cur_day)
-                    last_state, since, events = None, None, []
+                    last_state = None
                     cur_day = day
 
                 rgb = avg_color(sct, x, y, radius)
@@ -347,18 +356,13 @@ def cmd_run():
                     continue
 
                 if state != last_state:
-                    ts = now.strftime("%Y-%m-%d %H:%M:%S")
                     path, _ = day_log_path(cfg, now)
                     append_txt(path, now, state)
-                    events.append({"time": ts, "state": KOR[state]})
-                    since = ts
+                    since = now.strftime("%Y-%m-%d %H:%M:%S")
                     log(f"상태변경 {KOR[state]}")
                     last_state = state
-                    _, data = write_web_data(cfg, state, since, events)
+                    _, data = write_web_data(cfg, state, since, now)
                     publish(cfg, data, day)
-                else:
-                    # 상태 그대로면 웹의 갱신시각만 로컬에서 갱신
-                    _, data = write_web_data(cfg, state, since, events)
 
                 time.sleep(interval)
     except KeyboardInterrupt:
