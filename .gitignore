@@ -1,4 +1,13 @@
+# 토큰/좌표가 들어있으므로 절대 커밋하지 않음
 config.json
-status_log.csv
+
+# 빌드 산출물
+build/
+dist/
+*.spec
 __pycache__/
 *.pyc
+
+# 로컬에서 생성되는 일별 로그(프로그램이 GitHub API 로 따로 업로드함)
+logs/
+status_log.csv

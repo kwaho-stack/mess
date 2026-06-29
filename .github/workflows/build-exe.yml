@@ -1,0 +1,36 @@
+name: Build Windows EXE
+
+# 코드가 바뀌거나, Actions 탭에서 수동 실행하면 Windows용 exe 를 만들어 줍니다.
+on:
+  push:
+    branches: [ "claude/messenger-status-detection-n0evlx" ]
+    paths:
+      - "status_monitor.py"
+      - "requirements.txt"
+      - ".github/workflows/build-exe.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build exe
+        run: pyinstaller --onefile --name messenger_status status_monitor.py
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: messenger_status-exe
+          path: dist/messenger_status.exe

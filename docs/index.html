@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>메신저 접속 상태</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Malgun Gothic", "맑은 고딕", sans-serif;
+    margin: 0; background: #f4f6f9; color: #222;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 8px 0 20px; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 20px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 28px; font-weight: 700;
+  }
+  .dot { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
+  .on   { background: #e74c3c; }   /* 온라인 */
+  .away { background: #2e86de; }   /* 자리비움 */
+  .off  { background: #9aa3ad; }   /* 오프라인 */
+  .sub { color: #6b7480; font-size: 14px; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eef1f4; }
+  th { color: #8a929b; font-weight: 600; }
+  td .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border-radius: 999px; font-size: 13px;
+  }
+  .pill.on   { background: #fdecea; color: #c0392b; }
+  .pill.away { background: #e8f1fb; color: #1f6fc0; }
+  .pill.off  { background: #eef0f2; color: #5a6470; }
+  .pill .dot { width: 8px; height: 8px; }
+  .meta { color: #97a0a8; font-size: 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>메신저 접속 상태 모니터</h1>
+
+  <div class="card">
+    <div id="current" class="badge"><span class="dot off"></span><span>불러오는 중…</span></div>
+    <div id="since" class="sub"></div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:12px;">상태 변경 로그</div>
+    <table>
+      <thead><tr><th style="width:55%">시각</th><th>상태</th></tr></thead>
+      <tbody id="log"><tr><td colspan="2" style="color:#97a0a8">불러오는 중…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div id="meta" class="meta"></div>
+</div>
+
+<script>
+const CLS = { "온라인": "on", "자리비움": "away", "오프라인": "off" };
+
+function fmtDuration(fromStr) {
+  if (!fromStr) return "";
+  const from = new Date(fromStr.replace(/-/g, "/"));
+  if (isNaN(from)) return "";
+  let s = Math.max(0, Math.floor((Date.now() - from) / 1000));
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60);
+  return (h ? h + "시간 " : "") + m + "분 경과";
+}
+
+async function load() {
+  try {
+    const res = await fetch("data.json?_=" + Date.now(), { cache: "no-store" });
+    const d = await res.json();
+    const cls = CLS[d.current] || "off";
+
+    document.getElementById("current").innerHTML =
+      `<span class="dot ${cls}"></span><span>${d.current}</span>`;
+    document.getElementById("since").textContent =
+      d.since ? `${d.since} 부터 · ${fmtDuration(d.since)}` : "";
+
+    const rows = (d.events || []).map(e => {
+      const c = CLS[e.state] || "off";
+      return `<tr><td>${e.time}</td><td><span class="pill ${c}"><span class="dot ${c}"></span>${e.state}</span></td></tr>`;
+    }).join("");
+    document.getElementById("log").innerHTML =
+      rows || `<tr><td colspan="2" style="color:#97a0a8">기록 없음</td></tr>`;
+
+    document.getElementById("meta").textContent = "마지막 갱신: " + (d.updated || "-");
+  } catch (e) {
+    document.getElementById("meta").textContent = "데이터를 불러오지 못했습니다 (data.json 확인).";
+  }
+}
+load();
+setInterval(load, 20000);   // 20초마다 새로고침
+</script>
+</body>
+</html>
