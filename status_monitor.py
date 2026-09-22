@@ -32,7 +32,7 @@ if not os.path.isdir(BASE_DIR):
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # 상태 코드 -> 한글 이름
-KOR = {"ON": "온라인", "AWAY": "자리비움", "OFF": "오프라인"}
+KOR = {"ON": "온라인", "AWAY": "자리비움", "OFF": "오프라인", "NA": "확인불가"}
 
 DEFAULT_CONFIG = {
     "poll_interval_sec": 5,     # 몇 초마다 확인할지
@@ -41,7 +41,11 @@ DEFAULT_CONFIG = {
     "log_dir": "logs",          # 일별 txt 로그 폴더
     "docs_dir": "docs",         # HTML / data.json 폴더
     "max_web_events": 300,      # 웹에 보여줄 최근 이벤트 개수
+    "confirm_count": 3,         # 같은 상태가 N회 연속 읽혀야 기록(깜빡임 방지). 1이면 끔
+    "anchor_tolerance": 45,     # 기준점 색이 이만큼 벗어나면 '확인불가'
     "target": {"name": "", "x": 0, "y": 0},
+    # 로그인 화면/창 가림 감지용 기준점(로그인 상태에서 항상 흰 빈 공간)
+    "anchor": {"x": 0, "y": 0, "rgb": [255, 255, 255]},
     # --- GitHub 자동 업로드(선택). 비워두면 로컬 파일만 만듦 ---
     "github": {
         "enabled": False,
@@ -109,6 +113,27 @@ def classify(rgb):
     if b >= r and b >= g and (b - min(r, g)) > 25:    # 파랑(시계) = 자리비움
         return "AWAY"
     return "UNKNOWN"
+
+
+def color_dist(a, b):
+    """두 색의 채널별 최대 차이."""
+    return max(abs(int(a[i]) - int(b[i])) for i in range(3))
+
+
+def read_state(sct, cfg):
+    """
+    현재 상태 코드를 반환.
+    기준점(anchor) 색이 등록값과 다르면 = 목록 화면이 아님
+    (자동 로그아웃으로 로그인 화면이 떴거나, 다른 창에 가려짐) -> 'NA'(확인불가)
+    """
+    radius = cfg["sample_radius"]
+    anchor = cfg.get("anchor", {})
+    if anchor.get("x"):
+        cur = avg_color(sct, anchor["x"], anchor["y"], radius)
+        if color_dist(cur, anchor.get("rgb", [255, 255, 255])) > cfg["anchor_tolerance"]:
+            return "NA"
+    tgt = cfg["target"]
+    return classify(avg_color(sct, tgt["x"], tgt["y"], radius))
 
 
 # ---------------------------------------------------------------------------
@@ -297,17 +322,29 @@ def cmd_calibrate():
     import pyautogui
 
     cfg = load_config()
-    input("아이콘 위에 마우스를 올리고 Enter > ")
+    radius = cfg["sample_radius"]
+
+    input("1/2  아이콘 위에 마우스를 올리고 Enter > ")
     x, y = pyautogui.position()
     with mss.MSS() as sct:
-        rgb = avg_color(sct, x, y, cfg["sample_radius"])
+        rgb = avg_color(sct, x, y, radius)
     state = classify(rgb)
-
     cfg["target"] = {"name": "", "x": x, "y": y}
-    save_config(cfg)
-    print(f"등록됨 ({x}, {y}) · 현재 {KOR.get(state, '?')}")
+    print(f"     등록됨 ({x}, {y}) · 현재 {KOR.get(state, '?')}")
     if state == "UNKNOWN":
-        print("색이 애매합니다. 아이콘 정중앙으로 다시 등록하세요.")
+        print("     색이 애매합니다. 아이콘 정중앙으로 다시 등록하세요.")
+
+    print("2/2  이름 목록 아래 '흰 빈 공간'에 마우스를 올리고 Enter")
+    print("     (로그인 화면이 뜨면 색이 달라지는 곳)")
+    input("     > ")
+    ax, ay = pyautogui.position()
+    with mss.MSS() as sct:
+        argb = avg_color(sct, ax, ay, radius)
+    cfg["anchor"] = {"x": ax, "y": ay, "rgb": [int(v) for v in argb]}
+    print(f"     기준점 등록됨 ({ax}, {ay}) · 색 {tuple(int(v) for v in argb)}")
+
+    save_config(cfg)
+    print("완료. run.bat 으로 실행하세요.")
 
 
 # ---------------------------------------------------------------------------
@@ -321,9 +358,8 @@ def cmd_run():
         cfg = load_config()
         tgt = cfg.get("target", {})
 
-    x, y = tgt["x"], tgt["y"]
     interval = cfg["poll_interval_sec"]
-    radius = cfg["sample_radius"]
+    confirm = max(1, int(cfg.get("confirm_count", 1)))
 
     now = datetime.now()
     last_state, since = read_today_state(cfg, now)
@@ -333,10 +369,14 @@ def cmd_run():
 
     gh = cfg.get("github", {})
     log(f"시작: github_enabled={gh.get('enabled')} repo={gh.get('repo')} branch={gh.get('branch')}")
+    if not cfg.get("anchor", {}).get("x"):
+        log("기준점(anchor) 미설정 - 로그인 화면을 구분하지 못합니다. calibrate 를 다시 실행하세요.")
 
     # 시작 시 한 번 웹데이터 만들고 즉시 업로드 → 바로 확인 가능
     _, data = write_web_data(cfg, last_state or "OFF", since, now)
     publish(cfg, data, cur_day)
+
+    pending, pending_n, pending_at = None, 0, None
 
     try:
         with mss.MSS() as sct:
@@ -347,22 +387,32 @@ def cmd_run():
                 # 날짜(3시) 넘어가면 새 파일로 전환 (현재 상태를 새 날 첫 기록으로 남김)
                 if day != cur_day:
                     last_state = None
+                    pending, pending_n, pending_at = None, 0, None
                     cur_day = day
 
-                rgb = avg_color(sct, x, y, radius)
-                state = classify(rgb)
+                state = read_state(sct, cfg)
                 if state == "UNKNOWN":
                     time.sleep(interval)
                     continue
 
-                if state != last_state:
-                    path, _ = day_log_path(cfg, now)
-                    append_txt(path, now, state)
-                    since = now.strftime("%Y-%m-%d %H:%M:%S")
-                    log(f"상태변경 {KOR[state]}")
-                    last_state = state
-                    _, data = write_web_data(cfg, state, since, now)
-                    publish(cfg, data, day)
+                if state == last_state:
+                    pending, pending_n, pending_at = None, 0, None
+                else:
+                    # 같은 상태가 confirm 회 연속으로 읽혀야 기록(깜빡임/일시적 가림 무시)
+                    if state == pending:
+                        pending_n += 1
+                    else:
+                        pending, pending_n, pending_at = state, 1, now
+
+                    if pending_n >= confirm:
+                        path, _ = day_log_path(cfg, pending_at)
+                        append_txt(path, pending_at, state)
+                        since = pending_at.strftime("%Y-%m-%d %H:%M:%S")
+                        log(f"상태변경 {KOR[state]}")
+                        last_state = state
+                        pending, pending_n, pending_at = None, 0, None
+                        _, data = write_web_data(cfg, state, since, now)
+                        publish(cfg, data, day)
 
                 time.sleep(interval)
     except KeyboardInterrupt:

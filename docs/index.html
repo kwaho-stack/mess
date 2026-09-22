@@ -24,6 +24,7 @@
   .on   { background: #e74c3c; }   /* 온라인 */
   .away { background: #2e86de; }   /* 자리비움 */
   .off  { background: #9aa3ad; }   /* 오프라인 */
+  .na   { background: #e0a800; }   /* 확인불가 */
   .sub { color: #6b7480; font-size: 14px; margin-top: 10px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eef1f4; }
@@ -35,6 +36,7 @@
   .pill.on   { background: #fdecea; color: #c0392b; }
   .pill.away { background: #e8f1fb; color: #1f6fc0; }
   .pill.off  { background: #eef0f2; color: #5a6470; }
+  .pill.na   { background: #fdf3d7; color: #8a6a00; }
   .pill .dot { width: 8px; height: 8px; }
   tr.dayhead td {
     background: #f7f9fb; color: #5a6470; font-weight: 700;
@@ -64,7 +66,7 @@
 </div>
 
 <script>
-const CLS = { "온라인": "on", "자리비움": "away", "오프라인": "off" };
+const CLS = { "온라인": "on", "자리비움": "away", "오프라인": "off", "확인불가": "na" };
 
 function fmtDuration(fromStr) {
   if (!fromStr) return "";
