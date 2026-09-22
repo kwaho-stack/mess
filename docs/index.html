@@ -38,6 +38,17 @@
   .pill.off  { background: #eef0f2; color: #5a6470; }
   .pill.na   { background: #fdf3d7; color: #8a6a00; }
   .pill .dot { width: 8px; height: 8px; }
+  details.person { border-top: 1px solid #eef1f4; }
+  details.person > summary {
+    list-style: none; cursor: pointer; padding: 12px 4px;
+    display: flex; align-items: center; gap: 10px; font-size: 15px;
+  }
+  details.person > summary::-webkit-details-marker { display: none; }
+  details.person .who { font-weight: 600; flex: 1; }
+  details.person .when { color: #97a0a8; font-size: 12px; }
+  details.person .sub-log { padding: 0 4px 12px 28px; }
+  details.person .sub-log div { padding: 3px 0; font-size: 13px; color: #5a6470; }
+  details.person .sub-log .t { color: #97a0a8; margin-right: 8px; }
   tr.dayhead td {
     background: #f7f9fb; color: #5a6470; font-weight: 700;
     font-size: 13px; padding: 8px;
@@ -52,6 +63,11 @@
   <div class="card">
     <div id="current" class="badge"><span class="dot off"></span><span>불러오는 중…</span></div>
     <div id="since" class="sub"></div>
+  </div>
+
+  <div class="card" id="others-card" style="display:none">
+    <div style="font-weight:600;margin-bottom:4px;">다른 사람 현황</div>
+    <div id="others"></div>
   </div>
 
   <div class="card">
@@ -88,6 +104,24 @@ async function load() {
       `<span class="dot ${cls}"></span><span>${d.current}</span>`;
     document.getElementById("since").textContent =
       d.since ? `${d.since} 부터 · ${fmtDuration(d.since)}` : "";
+
+    const others = d.others || [];
+    document.getElementById("others-card").style.display = others.length ? "" : "none";
+    document.getElementById("others").innerHTML = others.map(p => {
+      const c = CLS[p.state] || "na";
+      const when = p.since ? `${p.since.slice(11, 16)}부터 · ${fmtDuration(p.since)}` : "";
+      const log = (p.events || []).map(e =>
+        `<div><span class="t">${(e.time || "").slice(11, 19)}</span>${e.state}</div>`
+      ).join("") || `<div class="t">오늘 변화 없음</div>`;
+      return `<details class="person">
+        <summary>
+          <span class="dot ${c}"></span>
+          <span class="who">${p.name}</span>
+          <span class="pill ${c}">${p.state}</span>
+        </summary>
+        <div class="sub-log"><div class="when">${when}</div>${log}</div>
+      </details>`;
+    }).join("");
 
     const events = d.events || [];
     let rows = "";

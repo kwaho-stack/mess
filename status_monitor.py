@@ -44,6 +44,8 @@ DEFAULT_CONFIG = {
     "confirm_count": 3,         # 같은 상태가 N회 연속 읽혀야 기록(깜빡임 방지). 1이면 끔
     "anchor_tolerance": 45,     # 기준점 색이 이만큼 벗어나면 '확인불가'
     "target": {"name": "", "x": 0, "y": 0},
+    # 현황만 추가로 볼 사람들 [{"name": "홍길동", "x": 0, "y": 0}, ...]
+    "others": [],
     # 로그인 화면/창 가림 감지용 기준점(로그인 상태에서 항상 흰 빈 공간)
     "anchor": {"x": 0, "y": 0, "rgb": [255, 255, 255]},
     # --- GitHub 자동 업로드(선택). 비워두면 로컬 파일만 만듦 ---
@@ -120,20 +122,23 @@ def color_dist(a, b):
     return max(abs(int(a[i]) - int(b[i])) for i in range(3))
 
 
-def read_state(sct, cfg):
+def anchor_ok(sct, cfg):
     """
-    현재 상태 코드를 반환.
-    기준점(anchor) 색이 등록값과 다르면 = 목록 화면이 아님
-    (자동 로그아웃으로 로그인 화면이 떴거나, 다른 창에 가려짐) -> 'NA'(확인불가)
+    기준점(anchor) 색이 등록값과 같은지 = 목록 화면이 맞는지.
+    다르면 자동 로그아웃(로그인 화면)이거나 다른 창에 가려진 상태.
     """
-    radius = cfg["sample_radius"]
-    anchor = cfg.get("anchor", {})
-    if anchor.get("x"):
-        cur = avg_color(sct, anchor["x"], anchor["y"], radius)
-        if color_dist(cur, anchor.get("rgb", [255, 255, 255])) > cfg["anchor_tolerance"]:
-            return "NA"
-    tgt = cfg["target"]
-    return classify(avg_color(sct, tgt["x"], tgt["y"], radius))
+    a = cfg.get("anchor", {})
+    if not a.get("x"):
+        return True  # 기준점 미설정 시 검사 생략
+    cur = avg_color(sct, a["x"], a["y"], cfg["sample_radius"])
+    return color_dist(cur, a.get("rgb", [255, 255, 255])) <= cfg["anchor_tolerance"]
+
+
+def read_point_state(sct, cfg, x, y, ok):
+    """한 좌표의 상태 코드. 목록 화면이 아니면 'NA'(확인불가)."""
+    if not ok:
+        return "NA"
+    return classify(avg_color(sct, x, y, cfg["sample_radius"]))
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +152,20 @@ def logical_date(dt, rollover_hour):
     return d
 
 
-def day_log_path(cfg, dt):
+def safe_name(name):
+    """파일명에 쓸 수 없는 문자 제거."""
+    return "".join(c for c in name if c not in '\\/:*?"<>|').strip() or "_"
+
+
+def day_log_path(cfg, dt, person=None):
+    """
+    person=None  -> 주 대상: logs/날짜.txt (이름 표기 없음)
+    person="이름" -> 추가 인원: logs/others/이름/날짜.txt
+    """
     d = logical_date(dt, cfg["rollover_hour"])
     log_dir = os.path.join(BASE_DIR, cfg["log_dir"])
+    if person:
+        log_dir = os.path.join(log_dir, "others", safe_name(person))
     os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f"{d.isoformat()}.txt"), d
 
@@ -163,9 +179,12 @@ def append_txt(path, dt, state_code):
         f.write(line)
 
 
-def read_day_events(cfg, d):
+def read_day_events(cfg, d, person=None):
     """특정 날짜(d) txt 파일을 읽어 이벤트 목록으로 반환."""
-    path = os.path.join(BASE_DIR, cfg["log_dir"], f"{d.isoformat()}.txt")
+    log_dir = os.path.join(BASE_DIR, cfg["log_dir"])
+    if person:
+        log_dir = os.path.join(log_dir, "others", safe_name(person))
+    path = os.path.join(log_dir, f"{d.isoformat()}.txt")
     out = []
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -178,10 +197,10 @@ def read_day_events(cfg, d):
     return out
 
 
-def read_today_state(cfg, now):
+def read_today_state(cfg, now, person=None):
     """오늘(논리적 날짜) txt 가 있으면 마지막 상태/시각을 복원."""
     today = logical_date(now, cfg["rollover_hour"])
-    events = read_day_events(cfg, today)
+    events = read_day_events(cfg, today, person)
     if events:
         last = events[-1]
         for code, name in KOR.items():
@@ -190,13 +209,23 @@ def read_today_state(cfg, now):
     return None, None
 
 
-def write_web_data(cfg, current_code, since, now):
-    """오늘 + 어제 이벤트를 합쳐 data.json 생성."""
+def write_web_data(cfg, current_code, since, now, others=None):
+    """오늘 + 어제 이벤트를 합쳐 data.json 생성. others 는 현황만 보는 사람들."""
     docs = os.path.join(BASE_DIR, cfg["docs_dir"])
     os.makedirs(docs, exist_ok=True)
     today = logical_date(now, cfg["rollover_hour"])
     yest = today - timedelta(days=1)
     events = read_day_events(cfg, yest) + read_day_events(cfg, today)
+
+    others_out = []
+    for p in (others or []):
+        others_out.append({
+            "name": p["name"],
+            "state": KOR.get(p.get("state"), "확인불가"),
+            "since": p.get("since") or "",
+            "events": read_day_events(cfg, today, p["name"])[-30:][::-1],
+        })
+
     data = {
         "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
         "current": KOR.get(current_code, "알수없음"),
@@ -204,6 +233,7 @@ def write_web_data(cfg, current_code, since, now):
         "today": today.isoformat(),
         "yesterday": yest.isoformat(),
         "events": events[-cfg["max_web_events"]:][::-1],  # 최신순
+        "others": others_out,
     }
     path = os.path.join(docs, "data.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -261,20 +291,57 @@ def github_put(cfg, repo_path, content_bytes, message):
         log(f"업로드 실패 {repo_path}: {e}")
 
 
-def publish(cfg, data, day):
-    """data.json 과 그 날 txt 를 GitHub 로 올린다."""
+def publish(cfg, data, day, with_txt=True):
+    """data.json 과 (필요시) 그 날 주 대상 txt 를 GitHub 로 올린다."""
     if not cfg.get("github", {}).get("enabled"):
         return
     docs = cfg["docs_dir"]
     github_put(cfg, f"{docs}/data.json",
                json.dumps(data, ensure_ascii=False, indent=2).encode(),
                f"update status: {data['current']} ({data['updated']})")
-    # 그 날 txt 도 업로드
+    # 주 대상 txt 는 그 사람의 상태가 바뀌었을 때만 업로드
+    if not with_txt:
+        return
     txt_path = os.path.join(BASE_DIR, cfg["log_dir"], f"{day.isoformat()}.txt")
     if os.path.exists(txt_path):
         with open(txt_path, "rb") as f:
             github_put(cfg, f"{cfg['log_dir']}/{day.isoformat()}.txt",
                        f.read(), f"log {day.isoformat()}")
+
+
+# ---------------------------------------------------------------------------
+# 상태 추적(깜빡임 방지 + 기록)
+# ---------------------------------------------------------------------------
+def new_tracker(cfg, now, name=None, x=0, y=0):
+    state, since = read_today_state(cfg, now, name)
+    return {"name": name, "x": x, "y": y, "state": state, "since": since,
+            "pending": None, "n": 0, "at": None}
+
+
+def step_tracker(tr, state, now, confirm, cfg):
+    """
+    같은 상태가 confirm 회 연속 읽히면 기록하고 True 반환.
+    기록 시각은 그 상태가 '처음' 감지된 시각을 쓴다.
+    """
+    if state == tr["state"]:
+        tr["pending"], tr["n"], tr["at"] = None, 0, None
+        return False
+
+    if state == tr["pending"]:
+        tr["n"] += 1
+    else:
+        tr["pending"], tr["n"], tr["at"] = state, 1, now
+    if tr["n"] < confirm:
+        return False
+
+    at = tr["at"]
+    path, _ = day_log_path(cfg, at, tr["name"])
+    append_txt(path, at, state)
+    tr["state"] = state
+    tr["since"] = at.strftime("%Y-%m-%d %H:%M:%S")
+    tr["pending"], tr["n"], tr["at"] = None, 0, None
+    log(f"상태변경 {tr['name'] or '주대상'} {KOR[state]}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +410,36 @@ def cmd_calibrate():
     cfg["anchor"] = {"x": ax, "y": ay, "rgb": [int(v) for v in argb]}
     print(f"     기준점 등록됨 ({ax}, {ay}) · 색 {tuple(int(v) for v in argb)}")
 
+    ask_others(cfg, pyautogui)
+
     save_config(cfg)
     print("완료. run.bat 으로 실행하세요.")
+
+
+def ask_others(cfg, pyautogui):
+    """현황만 볼 추가 인원 등록. 이름 없이 Enter 치면 기존 목록 유지."""
+    cur = cfg.get("others", [])
+    if cur:
+        print(f"     (현재 등록: {', '.join(p['name'] for p in cur)})")
+    print("3/3  현황만 볼 사람 추가 (없으면 그냥 Enter)")
+
+    picked = []
+    while True:
+        name = input("     이름(끝내려면 Enter) > ").strip()
+        if not name:
+            break
+        input(f"     '{name}' 아이콘 위에 마우스를 올리고 Enter > ")
+        ox, oy = pyautogui.position()
+        with mss.MSS() as sct:
+            st = classify(avg_color(sct, ox, oy, cfg["sample_radius"]))
+        picked.append({"name": name, "x": ox, "y": oy})
+        print(f"       등록됨 ({ox}, {oy}) · 현재 {KOR.get(st, '?')}")
+
+    if picked:
+        cfg["others"] = picked
+        print(f"     추가 인원 {len(picked)}명 저장")
+    elif cur:
+        print("     기존 추가 인원 유지")
 
 
 # ---------------------------------------------------------------------------
@@ -362,21 +457,23 @@ def cmd_run():
     confirm = max(1, int(cfg.get("confirm_count", 1)))
 
     now = datetime.now()
-    last_state, since = read_today_state(cfg, now)
+    main = new_tracker(cfg, now, None, tgt["x"], tgt["y"])
+    others = [new_tracker(cfg, now, p["name"], p["x"], p["y"])
+              for p in cfg.get("others", [])]
     _, cur_day = day_log_path(cfg, now)
 
     print("실행 중입니다. 이 창은 그대로 두세요. (종료: 이 창 닫기)")
 
     gh = cfg.get("github", {})
     log(f"시작: github_enabled={gh.get('enabled')} repo={gh.get('repo')} branch={gh.get('branch')}")
+    if others:
+        log("추가 인원: " + ", ".join(p["name"] for p in others))
     if not cfg.get("anchor", {}).get("x"):
         log("기준점(anchor) 미설정 - 로그인 화면을 구분하지 못합니다. calibrate 를 다시 실행하세요.")
 
     # 시작 시 한 번 웹데이터 만들고 즉시 업로드 → 바로 확인 가능
-    _, data = write_web_data(cfg, last_state or "OFF", since, now)
+    _, data = write_web_data(cfg, main["state"] or "OFF", main["since"], now, others)
     publish(cfg, data, cur_day)
-
-    pending, pending_n, pending_at = None, 0, None
 
     try:
         with mss.MSS() as sct:
@@ -386,33 +483,27 @@ def cmd_run():
 
                 # 날짜(3시) 넘어가면 새 파일로 전환 (현재 상태를 새 날 첫 기록으로 남김)
                 if day != cur_day:
-                    last_state = None
-                    pending, pending_n, pending_at = None, 0, None
+                    for tr in [main] + others:
+                        tr["state"] = None
+                        tr["pending"], tr["n"], tr["at"] = None, 0, None
                     cur_day = day
 
-                state = read_state(sct, cfg)
-                if state == "UNKNOWN":
-                    time.sleep(interval)
-                    continue
+                ok = anchor_ok(sct, cfg)
 
-                if state == last_state:
-                    pending, pending_n, pending_at = None, 0, None
-                else:
-                    # 같은 상태가 confirm 회 연속으로 읽혀야 기록(깜빡임/일시적 가림 무시)
-                    if state == pending:
-                        pending_n += 1
-                    else:
-                        pending, pending_n, pending_at = state, 1, now
+                main_changed, any_changed = False, False
+                for tr in [main] + others:
+                    state = read_point_state(sct, cfg, tr["x"], tr["y"], ok)
+                    if state == "UNKNOWN":
+                        continue
+                    if step_tracker(tr, state, now, confirm, cfg):
+                        any_changed = True
+                        if tr is main:
+                            main_changed = True
 
-                    if pending_n >= confirm:
-                        path, _ = day_log_path(cfg, pending_at)
-                        append_txt(path, pending_at, state)
-                        since = pending_at.strftime("%Y-%m-%d %H:%M:%S")
-                        log(f"상태변경 {KOR[state]}")
-                        last_state = state
-                        pending, pending_n, pending_at = None, 0, None
-                        _, data = write_web_data(cfg, state, since, now)
-                        publish(cfg, data, day)
+                if any_changed:
+                    _, data = write_web_data(
+                        cfg, main["state"] or "OFF", main["since"], now, others)
+                    publish(cfg, data, day, with_txt=main_changed)
 
                 time.sleep(interval)
     except KeyboardInterrupt:
@@ -424,6 +515,13 @@ def main():
     cmd = sys.argv[1].lower() if len(sys.argv) > 1 else ""
     if cmd == "calibrate":
         cmd_calibrate()
+    elif cmd == "others":
+        # 주 대상/기준점은 그대로 두고 추가 인원만 다시 등록
+        import pyautogui
+        cfg = load_config()
+        ask_others(cfg, pyautogui)
+        save_config(cfg)
+        print("완료. run.bat 으로 실행하세요.")
     elif cmd == "setup":
         cmd_setup()
     elif cmd == "run":
