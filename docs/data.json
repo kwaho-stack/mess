@@ -1,9 +1,28 @@
 {
-  "updated": "2026-09-22 21:30:37",
+  "updated": "2026-09-22 21:32:13",
   "current": "오프라인",
   "since": "",
   "today": "2026-09-22",
   "yesterday": "2026-09-21",
   "events": [],
-  "others": []
+  "others": [
+    {
+      "name": "Han",
+      "state": "확인불가",
+      "since": "",
+      "events": []
+    },
+    {
+      "name": "Seol",
+      "state": "확인불가",
+      "since": "",
+      "events": []
+    },
+    {
+      "name": "Seo",
+      "state": "확인불가",
+      "since": "",
+      "events": []
+    }
+  ]
 }
