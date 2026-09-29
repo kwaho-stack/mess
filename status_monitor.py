@@ -423,9 +423,11 @@ def ask_others(cfg, pyautogui):
         print(f"     (현재 등록: {', '.join(p['name'] for p in cur)})")
     print("3/3  현황만 볼 사람 추가 (없으면 그냥 Enter)")
 
+    print("     (인원 제한 없음 - 원하는 만큼 계속 추가할 수 있습니다)")
+
     picked = []
     while True:
-        name = input("     이름(끝내려면 Enter) > ").strip()
+        name = input(f"     {len(picked) + 1}번째 이름 (그만하려면 Enter) > ").strip()
         if not name:
             break
         input(f"     '{name}' 아이콘 위에 마우스를 올리고 Enter > ")
@@ -433,7 +435,7 @@ def ask_others(cfg, pyautogui):
         with mss.MSS() as sct:
             st = classify(avg_color(sct, ox, oy, cfg["sample_radius"]))
         picked.append({"name": name, "x": ox, "y": oy})
-        print(f"       등록됨 ({ox}, {oy}) · 현재 {KOR.get(st, '?')}")
+        print(f"       등록됨 ({ox}, {oy}) · 현재 {KOR.get(st, '?')}  [총 {len(picked)}명]")
 
     if picked:
         cfg["others"] = picked
